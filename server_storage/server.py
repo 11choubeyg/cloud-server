@@ -13,11 +13,32 @@ print(f"Server listening on {HOST}:{PORT}...")
 conn, addr = server_socket.accept()
 print(f"Connected by {addr}")
 
+def read_line(conn):
+    """Read bytes from conn until a newline, return decoded string. Returns None if connection closes early."""
+    line = b""
+    while not line.endswith(b"\n"):
+        chunk = conn.recv(1)
+        if not chunk:
+            return None  # connection closed unexpectedly
+        line += chunk
+    return line.decode().strip()
+
 # --- login step ---
-login_line = b""
-while not login_line.endswith(b"\n"):
-    login_line += conn.recv(1)
-username, password = login_line.decode().strip().split("|")
+login_line = read_line(conn)
+if login_line is None:
+    print("Client disconnected before sending login info.")
+    conn.close()
+    server_socket.close()
+    exit()
+
+try:
+    username, password = login_line.split("|")
+except ValueError:
+    print(f"Malformed login line received: {login_line!r}")
+    conn.send(b"FAIL\n")
+    conn.close()
+    server_socket.close()
+    exit()
 
 if check_login(username, password):
     print(f"Login OK for '{username}'")
@@ -34,11 +55,22 @@ user_folder = f"user_{username}"
 os.makedirs(user_folder, exist_ok=True)
 
 # --- file transfer step ---
-header = b""
-while not header.endswith(b"\n"):
-    header += conn.recv(1)
-filename, filesize = header.decode().strip().split("|")
-filesize = int(filesize)
+header = read_line(conn)
+if header is None:
+    print("Client disconnected before sending file header.")
+    conn.close()
+    server_socket.close()
+    exit()
+
+try:
+    filename, filesize = header.split("|")
+    filesize = int(filesize)
+except ValueError:
+    print(f"Malformed file header received: {header!r}")
+    conn.close()
+    server_socket.close()
+    exit()
+
 print(f"Receiving '{filename}' ({filesize} bytes) for user '{username}'...")
 
 save_path = os.path.join(user_folder, filename)
@@ -48,10 +80,15 @@ with open(save_path, "wb") as f:
     while received < filesize:
         chunk = conn.recv(min(4096, filesize - received))
         if not chunk:
+            print(f"Warning: connection dropped early. Got {received}/{filesize} bytes.")
             break
         f.write(chunk)
         received += len(chunk)
 
-print(f"Saved {received} bytes to {save_path}")
+if received == filesize:
+    print(f"Saved {received} bytes to {save_path}")
+else:
+    print(f"Incomplete transfer: saved {received}/{filesize} bytes to {save_path}")
+
 conn.close()
 server_socket.close()
