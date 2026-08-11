@@ -1,4 +1,5 @@
 import socket
+import os
 from users import check_login
 
 HOST = '127.0.0.1'
@@ -28,16 +29,22 @@ else:
     server_socket.close()
     exit()
 
-# --- file transfer step (only runs if login succeeded) ---
+# --- set up this user's private folder ---
+user_folder = f"user_{username}"
+os.makedirs(user_folder, exist_ok=True)
+
+# --- file transfer step ---
 header = b""
 while not header.endswith(b"\n"):
     header += conn.recv(1)
 filename, filesize = header.decode().strip().split("|")
 filesize = int(filesize)
-print(f"Receiving '{filename}' ({filesize} bytes)...")
+print(f"Receiving '{filename}' ({filesize} bytes) for user '{username}'...")
+
+save_path = os.path.join(user_folder, filename)
 
 received = 0
-with open("received_" + filename, "wb") as f:
+with open(save_path, "wb") as f:
     while received < filesize:
         chunk = conn.recv(min(4096, filesize - received))
         if not chunk:
@@ -45,6 +52,6 @@ with open("received_" + filename, "wb") as f:
         f.write(chunk)
         received += len(chunk)
 
-print(f"Saved {received} bytes to received_{filename}")
+print(f"Saved {received} bytes to {save_path}")
 conn.close()
 server_socket.close()
